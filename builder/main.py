@@ -49,6 +49,16 @@ if env.get("PROGNAME", "program") == "program":
 
 env.Append(
     BUILDERS=dict(
+        ElfToBin=Builder(
+            action=env.VerboseAction(" ".join([
+                "$OBJCOPY",
+                "-O",
+                "binary",
+                "$SOURCES",
+                "$TARGET"
+            ]), "Building $TARGET"),
+            suffix=".bin"
+        ),
         ElfToHex=Builder(
             action=env.VerboseAction(" ".join([
                 "$OBJCOPY",
@@ -72,9 +82,11 @@ if not env.get("PIOFRAMEWORK"):
 target_elf = None
 if "nobuild" in COMMAND_LINE_TARGETS:
     target_elf = join("$BUILD_DIR", "${PROGNAME}.elf")
+    target_firm = join("$BUILD_DIR", "${PROGNAME}.bin")
     target_hex = join("$BUILD_DIR", "${PROGNAME}.hex")
 else:
     target_elf = env.BuildProgram()
+    target_firm = env.ElfToBin(join("$BUILD_DIR", "${PROGNAME}"), target_elf)
     target_hex = env.ElfToHex(join("$BUILD_DIR", "${PROGNAME}"), target_elf)
 
 AlwaysBuild(env.Alias("nobuild", target_elf))
@@ -161,6 +173,40 @@ elif upload_protocol in debug_tools:
         UPLOADERFLAGS=openocd_args,
         UPLOADCMD="$UPLOADER $UPLOADERFLAGS")
     upload_actions = [env.VerboseAction("$UPLOADCMD", "Uploading $SOURCE")]
+
+elif upload_protocol == "dfu":
+    hwids = board_config.get("build.hwids", [["0x0483", "0xDF11"]])
+    vid = hwids[0][0]
+    pid = hwids[0][1]
+    _upload_tool = join(platform.get_package_dir(
+        "tool-dfuutil") or "", "bin", "dfu-util")
+    _upload_flags = [
+        "-d", "%s:%s" % (vid.split('x')[1], pid.split('x')[1]),
+        "-a", "0", "--dfuse-address",
+        "%s:leave" % board_config.get("upload.offset_address", "0x08000000"), "-D"
+    ]
+    
+    upload_actions = [env.VerboseAction("$UPLOADCMD", "Uploading $SOURCE")]
+
+    # Add special DFU header to the binary image
+    env.AddPostAction(
+        join("$BUILD_DIR", "${PROGNAME}.bin"),
+        env.VerboseAction(
+            " ".join([
+                join(platform.get_package_dir(
+                    "tool-dfuutil") or "", "bin", "dfu-suffix"),
+                "-v %s" % vid,
+                "-p %s" % pid,
+                "-d 0xffff", "-a", "$TARGET"
+            ]), "Adding dfu suffix to ${PROGNAME}.bin"))
+
+    env.Replace(
+        UPLOADER = _upload_tool,
+        UPLOADERFLAGS = _upload_flags,
+        UPLOADCMD = '$UPLOADER $UPLOADERFLAGS "${SOURCE.get_abspath()}"'
+    )
+
+    upload_target = target_firm
 
 # custom upload tool
 elif upload_protocol == "custom":

@@ -43,6 +43,11 @@
       "type": "uploader",
       "optional": true,
       "version": "^1.65200.0"
+    },
+    "tool-dfuutil": {
+      "type": "uploader",
+      "optional": true,
+      "version": "~1.9.200310"
     }
   }
 }
